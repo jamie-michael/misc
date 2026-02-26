@@ -1,0 +1,44 @@
+name: Deploy Cloud Function
+
+on:
+  push:
+    branches:
+      - 'main'
+
+jobs:
+  all:
+    name: CI/CD workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@master
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: 22
+
+      - name: 'Authenticate to Google Cloud'
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          
+      - run: npx @wakeflow/secrets
+
+      - run: npx dotenv-to-yaml .env .env.yaml
+
+      - run: |
+            gcloud functions deploy api \
+            --region=europe-west2 \
+            --runtime=nodejs22 \
+            --trigger-http \
+            --entry-point=api \
+            --env-vars-file=.env.yaml
+
+      - run: |
+          gcloud functions add-invoker-policy-binding api \
+          --region="europe-west2" \
+          --member="allUsers"
