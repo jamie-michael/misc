@@ -7,7 +7,7 @@ import axios from 'axios'
 import dayjs from 'dayjs'
 import { Octokit } from 'octokit'
 
-import log from './lib/logger.js'
+import log from '../src/lib/logger.js'
 
 const LIMIT_PER_REPO = 100
 const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(48,`hour`)
@@ -189,6 +189,9 @@ function normalizeCommit(apiCommit,repoName,diff = null) {
 }
 
 async function run() {
+  if (!process.env.REPORT_OUTPUT_PATH?.trim()) {
+    process.env.REPORT_OUTPUT_PATH = path.join(process.cwd(), 'daily-standup', `standup-${dayjs().format('YYYY-MM-DD')}.md`)
+  }
   const token = process.env.GITHUB_TOKEN
   if (!token?.trim()) {
     log.error(`commits: GITHUB_TOKEN is not set`)
@@ -330,8 +333,10 @@ async function run() {
       sections.push(`(no stand-up items)`)
     notes = sections.join(`\n`).trimEnd()
     log.info(`commits: done`,allCommits.length,`commits`,notableByRepo.size,`repos with notable bullets`)
-  } else
+  } else {
+    notes = `No commits for today.`
     log.info(`commits: done`,allCommits.length,`total commits`)
+  }
 
   const outputPath = process.env.REPORT_OUTPUT_PATH?.trim()
   if (outputPath) {
@@ -351,4 +356,3 @@ if (isMain)
     log.error(`commits:`,err.message)
     process.exit(1)
   })
-

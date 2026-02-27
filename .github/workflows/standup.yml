@@ -29,16 +29,14 @@ jobs:
 
       - name: Create env file
         run: |
-          echo "${{ secrets.ENV_FILE }}" > .env.standup
+          echo "${{ secrets.ENV_FILE }}" > .env
 
       - name: Run script
-        env:
-          ENV_FILE: .env.standup
-        run: node scripts/generate-standup.js
+        run: node scripts/daily-standup-report.js
 
       - name: Commit changes
         run: |
           git config user.name "standup-bot"
           git config user.email "standup-bot@users.noreply.github.com"
-          git add standups/
+          git add daily-standup/
           git diff --cached --quiet || (git commit -m "chore: update standup" && git push)

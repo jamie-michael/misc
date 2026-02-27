@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "type": "module",
-  "main": "src/commits-report.js",
+  "main": "scripts/daily-standup-report.js",
   "scripts": {
-    "start": "node src/commits-report.js",
-    "report": "node src/commits-report.js",
+    "start": "node scripts/daily-standup-report.js",
+    "report": "node scripts/daily-standup-report.js",
     "test": "mocha \"src/**/*.test.js\" --timeout 15000",
     "watch": "mocha --watch \"src/**/*.test.js\" --timeout 15000"
   },
