@@ -2,6 +2,7 @@ import 'dotenv/config'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+
 import axios from 'axios'
 import dayjs from 'dayjs'
 import { Octokit } from 'octokit'
@@ -9,7 +10,7 @@ import { Octokit } from 'octokit'
 import log from './lib/logger.js'
 
 const LIMIT_PER_REPO = 100
-const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(24,`hour`)
+const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(48,`hour`)
 const OPENAI_URL = `https://api.openai.com/v1/chat/completions`
 const DIFF_MAX_CHARS = 6000
 
@@ -325,9 +326,9 @@ async function run() {
   const outputPath = process.env.REPORT_OUTPUT_PATH?.trim()
   if (outputPath) {
     const dir = path.dirname(outputPath)
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(outputPath, notes, `utf8`)
-    log.info(`commits: report written`, outputPath)
+    fs.mkdirSync(dir,{ recursive: true })
+    fs.writeFileSync(outputPath,notes,`utf8`)
+    log.info(`commits: report written`,outputPath)
   }
   console.log(notes)
 }
@@ -335,9 +336,9 @@ async function run() {
 export { run }
 
 const isMain = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])
-if (isMain) {
+if (isMain)
   run().catch(err => {
     log.error(`commits:`,err.message)
     process.exit(1)
   })
-}
+
