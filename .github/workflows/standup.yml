@@ -27,13 +27,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Create env file
+        run: |
+          echo "${{ secrets.ENV_FILE }}" > .env.standup
+
       - name: Run script
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ORG: ${{ secrets.GITHUB_ORG }}
-          GITHUB_USER: ${{ secrets.GITHUB_USER }}
-          GITHUB_AUTHOR: ${{ secrets.GITHUB_AUTHOR }}
+          ENV_FILE: .env.standup
         run: node scripts/generate-standup.js
 
       - name: Commit changes
