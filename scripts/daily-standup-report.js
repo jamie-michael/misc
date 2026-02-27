@@ -59,11 +59,11 @@ Choose the closest match.
 
 5 = Major user-facing feature or significant milestone; or major internal win (e.g. big perf/reliability improvement)  
 4 = Meaningful user-facing improvement or important bug fix; or meaningful internal work (e.g. DB performance, API reliability, cleanup that reduces tech debt)  
-3 = Notable progress: moderate bug fix, backend change affecting behaviour, or substantive internal work (refactors, performance, tidying, dev tooling that helps the team, cleanups)  
-2 = Minor tweak, small refactor, low-impact improvement  
-1 = Trivial only: config-only tweak, formatting-only, logging-only, or genuinely not worth mentioning  
+3 = Notable progress: moderate bug fix, backend change affecting behaviour, or substantive internal work that affects the whole team or system (refactors, performance, tidying, cleanups that matter)  
+2 = Minor tweak, small refactor, low-impact improvement; or small dev convenience that only helps one person's workflow  
+1 = Trivial only: lockfile/dependency file changes, config-only tweak, formatting-only, logging-only, or genuinely not worth mentioning  
 
-Important: "Impact" includes both user-facing work AND meaningful internal/team work. Do not mark DB performance, cleanups, refactors, or dev-only improvements as 1 just because they are not customer-facing. If it's real work (performance, reliability, tidying, internal tooling), score it 3 or higher when it's substantive.
+Important: Score 3+ for internal work that is substantive and team- or system-wide (DB performance, reliability, real cleanups). Do NOT score 3+ for: lockfile or package-manager file changes; small personal dev conveniences (e.g. pre-filling a form from last commit); tooling that only streamlines one person's workflow. Those are 1–2 and not stand-up headline material.
 
 ---
 
@@ -72,7 +72,7 @@ Important: "Impact" includes both user-facing work AND meaningful internal/team 
 Rules:
 - Set standupNotable = true when impact_score >= 3 (worth calling out in stand-up).
 - If impact_score < 3, set standupNotable = false (still summarize it, but it's not a headline).
-- Internal work, dev-only improvements, cleanups, DB performance, and tooling that helps the team CAN be notable (score 3+) when substantive—they do not have to be user-facing.
+- Internal work that affects the team or system (DB performance, reliability, real cleanups) CAN be notable. Lockfile/dependency changes and small personal dev conveniences (e.g. "pre-fill from last commit") are NOT notable—keep them (context) only.
 
 You still provide a bullet_summary for every commit so the reader sees what was done; standupNotable just distinguishes "headline" vs "for context".
 
@@ -325,9 +325,9 @@ async function run() {
         if (notable.length === 0 && other.length === 0) continue
         sections.push(repo)
         for (const b of notable)
-          sections.push(`    • ${b}`)
+          sections.push(`    * ${b}`)
         for (const b of other)
-          sections.push(`    (context) ${b}`)
+          sections.push(`    * (context) ${b}`)
         sections.push(``)
       }
     else
