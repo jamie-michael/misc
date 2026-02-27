@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node scripts/daily-standup-report.js",
     "report": "node scripts/daily-standup-report.js",
+    "report:weekly": "node scripts/weekly-standup-report.js",
     "test": "mocha \"src/**/*.test.js\" --timeout 15000",
     "watch": "mocha --watch \"src/**/*.test.js\" --timeout 15000"
   },

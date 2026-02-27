@@ -5,8 +5,8 @@ on:
     branches:
       - main
   schedule:
-    # Every 2 mins (for testing; change back to "0 2 * * *" for 3am UK)
-    - cron: "*/2 * * * *"
+    # 2am UTC, Monday–Friday only (e.g. 3am UK in winter)
+    - cron: "0 2 * * 1-5"
 
 jobs:
   generate:
@@ -31,12 +31,15 @@ jobs:
         run: |
           echo "${{ secrets.ENV_FILE }}" > .env
 
-      - name: Run script
+      - name: Run daily script
         run: node scripts/daily-standup-report.js
+
+      - name: Run weekly script (Thursdays only)
+        run: '[ "$(date -u +%u)" = "4" ] && node scripts/weekly-standup-report.js || true'
 
       - name: Commit changes
         run: |
           git config user.name "standup-bot"
           git config user.email "standup-bot@users.noreply.github.com"
-          git add daily-standup/
+          git add daily-standup/ weekly-standup/
           git diff --cached --quiet || (git commit -m "chore: update standup" && git push)
