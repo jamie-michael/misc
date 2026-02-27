@@ -7,6 +7,7 @@ import axios from 'axios'
 import dayjs from 'dayjs'
 
 import log from '../src/lib/logger.js'
+import { sendEmail } from '../src/lib/email.js'
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 // Week = previous Friday + Mon, Tue, Wed, Thu (run just after Thursday night's daily)
@@ -146,6 +147,13 @@ async function run() {
 
   fs.writeFileSync(outputPath, fullContent, 'utf8')
   log.info('weekly: report written', outputPath)
+
+  const emailResult = await sendEmail({
+    subject: `Weekly standup week ending ${weekEnding}`,
+    body: fullContent,
+  })
+  if (emailResult.sent) log.info('weekly: email sent', emailResult.to)
+  else if (emailResult.skipped) log.warn('weekly: email skipped', emailResult.reason)
 
   console.log(fullContent)
 }

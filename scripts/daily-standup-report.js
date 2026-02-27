@@ -8,9 +8,10 @@ import dayjs from 'dayjs'
 import { Octokit } from 'octokit'
 
 import log from '../src/lib/logger.js'
+import { sendEmail } from '../src/lib/email.js'
 
 const LIMIT_PER_REPO = 100
-const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(48,`hour`)
+const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(1,`day`)
 const OPENAI_URL = `https://api.openai.com/v1/chat/completions`
 const DIFF_MAX_CHARS = 6000
 
@@ -346,6 +347,14 @@ async function run() {
     fs.writeFileSync(outputPath,notes,`utf8`)
     log.info(`commits: report written`,outputPath)
   }
+
+  const emailResult = await sendEmail({
+    subject: `Standup ${dayjs().format('YYYY-MM-DD')}`,
+    body: notes,
+  })
+  if (emailResult.sent) log.info(`commits: email sent`, emailResult.to)
+  else if (emailResult.skipped) log.warn(`commits: email skipped`, emailResult.reason)
+
   console.log(notes)
 }
 
