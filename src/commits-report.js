@@ -67,12 +67,14 @@ Be strict with scoring. Most commits should be 2 or below unless clearly meaning
 
 ---
 
-### 3. Decide if this should appear in stand-up.
+### 3. Mark whether this is notable for stand-up.
 
 Rules:
-- Include only if impact_score >= 3.
-- If impact_score < 3, mark include_in_standup as false.
-- Tooling, config, or automation changes are usually NOT stand-up worthy unless they significantly improve team velocity.
+- Set standupNotable = true only if impact_score >= 3 (worth calling out in stand-up).
+- If impact_score < 3, set standupNotable = false (still summarize it, but it's not a headline).
+- Tooling, config, or automation changes are usually NOT notable unless they significantly improve team velocity.
+
+You still provide a bullet_summary for every commit so the reader sees what was done; standupNotable just distinguishes "headline" vs "for context".
 
 ---
 
@@ -86,7 +88,7 @@ Rules:
 - Keep it 1–2 lines max.
 - Write it as a speaking prompt (not a full paragraph).
 
-If include_in_standup is false, still generate a short neutral summary, but keep it minimal.
+If standupNotable is false, still generate a short neutral summary, but keep it minimal.
 
 ---
 
@@ -97,7 +99,7 @@ Return ONLY valid JSON in this exact structure:
 {
   "category": "",
   "impact_score": 0,
-  "include_in_standup": false,
+  "standupNotable": false,
   "bullet_summary": "",
   "reasoning": ""
 }
@@ -105,8 +107,8 @@ Return ONLY valid JSON in this exact structure:
 Where:
 - category = chosen classification
 - impact_score = number 1–5
-- include_in_standup = true or false
-- bullet_summary = concise speaking-ready bullet
+- standupNotable = true if worth calling out in stand-up, false if minor but still summarized for context
+- bullet_summary = concise speaking-ready bullet (always provide one)
 - reasoning = short explanation of why this score was chosen (1–3 sentences)
 
 Do NOT include any additional text outside the JSON.`
@@ -125,7 +127,8 @@ function parseStandupResponse(raw) {
   if (match) text = match[1].trim()
   const out = JSON.parse(text)
   if (typeof out.impact_score !== `number`) out.impact_score = Number(out.impact_score) || 1
-  if (typeof out.include_in_standup !== `boolean`) out.include_in_standup = Boolean(out.include_in_standup)
+  const rawNotable = out.standupNotable ?? out.standup_notable ?? out.include_in_standup
+  if (typeof out.standupNotable !== `boolean`) out.standupNotable = Boolean(rawNotable)
   return out
 }
 
@@ -274,7 +277,7 @@ async function run() {
         log.info(`commits: classified`,commit.shortHash,commit.repoName,commit.subject?.slice(0,50),{
           category: standup.category,
           impact_score: standup.impact_score,
-          include_in_standup: standup.include_in_standup,
+          standupNotable: standup.standupNotable,
           bullet_summary: standup.bullet_summary?.slice(0,80),
           reasoning: standup.reasoning?.slice(0,120),
         })
@@ -287,11 +290,14 @@ async function run() {
       if (!commitsByRepo.has(c.repoName)) commitsByRepo.set(c.repoName,[])
       commitsByRepo.get(c.repoName).push(c.subject || `(no subject)`)
     }
-    const standupByRepo = new Map()
+    const notableByRepo = new Map()
+    const otherByRepo = new Map()
     for (const c of allCommits) {
-      if (!c.standup?.include_in_standup || !c.standup?.bullet_summary) continue
-      if (!standupByRepo.has(c.repoName)) standupByRepo.set(c.repoName,[])
-      standupByRepo.get(c.repoName).push(c.standup.bullet_summary)
+      if (!c.standup?.bullet_summary) continue
+      const isNotable = c.standup.standupNotable
+      const map = isNotable ? notableByRepo : otherByRepo
+      if (!map.has(c.repoName)) map.set(c.repoName,[])
+      map.get(c.repoName).push(c.standup.bullet_summary)
     }
 
     const sections = []
@@ -307,19 +313,23 @@ async function run() {
       sections.push(``)
     }
     sections.push(`Summary`)
-    if (standupByRepo.size > 0)
+    const hasAnySummary = notableByRepo.size > 0 || otherByRepo.size > 0
+    if (hasAnySummary)
       for (const repo of repoOrder) {
-        const bullets = standupByRepo.get(repo)
-        if (!bullets?.length) continue
+        const notable = notableByRepo.get(repo) || []
+        const other = otherByRepo.get(repo) || []
+        if (notable.length === 0 && other.length === 0) continue
         sections.push(repo)
-        for (const b of bullets)
-          sections.push(`    ${b}`)
+        for (const b of notable)
+          sections.push(`    • ${b}`)
+        for (const b of other)
+          sections.push(`    (context) ${b}`)
         sections.push(``)
       }
     else
       sections.push(`(no stand-up items)`)
     notes = sections.join(`\n`).trimEnd()
-    log.info(`commits: done`,allCommits.length,`commits`,standupByRepo.size,`repos with stand-up bullets`)
+    log.info(`commits: done`,allCommits.length,`commits`,notableByRepo.size,`repos with notable bullets`)
   } else
     log.info(`commits: done`,allCommits.length,`total commits`)
 
