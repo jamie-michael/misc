@@ -1,1 +1,0 @@
-export { app as api } from './src/app.js'

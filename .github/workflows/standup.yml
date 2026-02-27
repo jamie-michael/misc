@@ -1,0 +1,40 @@
+name: Standup Generator
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Every 2 mins (for testing; change back to "0 2 * * *" for 3am UK)
+    - cron: "*/2 * * * *"
+
+jobs:
+  generate:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, 'chore: update standup')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Run script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/generate-standup.js
+
+      - name: Commit changes
+        run: |
+          git config user.name "standup-bot"
+          git config user.email "standup-bot@users.noreply.github.com"
+          git add standups/
+          git diff --cached --quiet || (git commit -m "chore: update standup" && git push)

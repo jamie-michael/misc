@@ -1,12 +1,12 @@
 {
-  "name": "api-template",
+  "name": "commits-report",
   "version": "1.0.0",
   "description": "",
   "type": "module",
-  "main": "index.js",
+  "main": "src/commits-report.js",
   "scripts": {
-    "start": "nodemon src/server.js",
-    "dev": "nodemon src/server.js",
+    "start": "node src/commits-report.js",
+    "report": "node src/commits-report.js",
     "test": "mocha \"src/**/*.test.js\" --timeout 15000",
     "watch": "mocha --watch \"src/**/*.test.js\" --timeout 15000"
   },
@@ -16,15 +16,14 @@
   "dependencies": {
     "axios": "^1.13.2",
     "chalk": "^5.6.2",
-    "cors": "^2.8.5",
+    "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
-    "express": "^5.2.1"
+    "octokit": "^5.0.5",
+    "openai": "^4.77.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
     "chai": "^6.2.1",
-    "chai-http": "^5.1.2",
     "eslint": "^9.39.1",
     "eslint-plugin-import": "^2.32.0",
     "mocha": "^11.7.5"
