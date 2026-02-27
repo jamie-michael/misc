@@ -57,31 +57,32 @@ Choose the closest match.
 
 ### 2. Assign an impact score from 1–5:
 
-5 = Major user-facing feature or significant milestone  
-4 = Meaningful user-facing improvement or important bug fix  
-3 = Notable progress, moderate bug fix, or backend change affecting behaviour  
+5 = Major user-facing feature or significant milestone; or major internal win (e.g. big perf/reliability improvement)  
+4 = Meaningful user-facing improvement or important bug fix; or meaningful internal work (e.g. DB performance, API reliability, cleanup that reduces tech debt)  
+3 = Notable progress: moderate bug fix, backend change affecting behaviour, or substantive internal work (refactors, performance, tidying, dev tooling that helps the team, cleanups)  
 2 = Minor tweak, small refactor, low-impact improvement  
-1 = Dev-only change, tooling, config, formatting, logging, or not worth mentioning  
+1 = Trivial only: config-only tweak, formatting-only, logging-only, or genuinely not worth mentioning  
 
-Be strict with scoring. Most commits should be 2 or below unless clearly meaningful.
+Important: "Impact" includes both user-facing work AND meaningful internal/team work. Do not mark DB performance, cleanups, refactors, or dev-only improvements as 1 just because they are not customer-facing. If it's real work (performance, reliability, tidying, internal tooling), score it 3 or higher when it's substantive.
 
 ---
 
 ### 3. Mark whether this is notable for stand-up.
 
 Rules:
-- Set standupNotable = true only if impact_score >= 3 (worth calling out in stand-up).
+- Set standupNotable = true when impact_score >= 3 (worth calling out in stand-up).
 - If impact_score < 3, set standupNotable = false (still summarize it, but it's not a headline).
-- Tooling, config, or automation changes are usually NOT notable unless they significantly improve team velocity.
+- Internal work, dev-only improvements, cleanups, DB performance, and tooling that helps the team CAN be notable (score 3+) when substantive—they do not have to be user-facing.
 
 You still provide a bullet_summary for every commit so the reader sees what was done; standupNotable just distinguishes "headline" vs "for context".
 
 ---
 
-### 4. Generate a product-focused bullet point.
+### 4. Generate a concise bullet point.
 
 Rules:
-- Focus on user impact or product progress.
+- For user-facing work: focus on user impact or product progress.
+- For internal work (performance, cleanups, refactors, tooling): focus on what was improved or why it matters to the team (e.g. "Improved DB query performance for X", "Cleaned up Y to reduce tech debt").
 - Do NOT mention file names, function names, libraries, or implementation details.
 - Slightly elevate the language to sound professional and intentional.
 - Do NOT exaggerate.
