@@ -12,8 +12,8 @@ import { sendEmail } from '../src/lib/email.js'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 // Week = previous Friday + Mon, Tue, Wed, Thu (run just after Thursday night's daily)
 const THURSDAY_DOW = 4 // 0 = Sunday in JS
-const DAILY_STANDUP_DIR = path.join(process.cwd(), 'daily-standup')
-const WEEKLY_STANDUP_DIR = path.join(process.cwd(), 'weekly-standup')
+const DAILY_STANDUP_DIR = path.join(process.cwd(), 'reports', 'daily-standup')
+const WEEKLY_STANDUP_DIR = path.join(process.cwd(), 'reports', 'weekly-standup')
 
 const WEEKLY_SUMMARY_PROMPT = `You are an AI assistant that merges multiple daily stand-up reports into one weekly report.
 
@@ -141,7 +141,7 @@ async function run() {
     '---',
     '',
     '**Sources (files read):**',
-    ...standupFiles.map(f => `- \`daily-standup/standup-${f.date}.md\``),
+    ...standupFiles.map(f => `- \`reports/daily-standup/standup-${f.date}.md\``),
   ].join('\n')
   const fullContent = (summary || fallback) + sourcesBlock
 

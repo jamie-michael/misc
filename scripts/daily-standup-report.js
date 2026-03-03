@@ -192,7 +192,7 @@ function normalizeCommit(apiCommit,repoName,diff = null) {
 
 async function run() {
   if (!process.env.REPORT_OUTPUT_PATH?.trim()) {
-    process.env.REPORT_OUTPUT_PATH = path.join(process.cwd(), 'daily-standup', `standup-${dayjs().format('YYYY-MM-DD')}.md`)
+    process.env.REPORT_OUTPUT_PATH = path.join(process.cwd(), 'reports', 'daily-standup', `standup-${dayjs().format('YYYY-MM-DD')}.md`)
   }
   const token = process.env.GITHUB_TOKEN
   if (!token?.trim()) {
