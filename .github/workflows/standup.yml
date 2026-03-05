@@ -34,8 +34,8 @@ jobs:
       - name: Run daily script
         run: node scripts/daily-standup-report.js
 
-      - name: Run weekly script (Thursdays only)
-        run: '[ "$(date -u +%u)" = "4" ] && node scripts/weekly-standup-report.js || true'
+      - name: Run weekly script (Fridays only)
+        run: '[ "$(date -u +%u)" = "5" ] && node scripts/weekly-standup-report.js || true'
 
       - name: Commit changes
         run: |
