@@ -11,7 +11,6 @@ import log from '../src/lib/logger.js'
 import { sendEmail } from '../src/lib/email.js'
 
 const LIMIT_PER_REPO = 100
-const TWENTY_FOUR_HOURS_AGO = dayjs().subtract(1,`day`)
 const OPENAI_URL = `https://api.openai.com/v1/chat/completions`
 const DIFF_MAX_CHARS = 6000
 
@@ -190,6 +189,10 @@ function normalizeCommit(apiCommit,repoName,diff = null) {
   }
 }
 
+function getReportingWindowStart(now = dayjs()) {
+  return now.day() === 1 ? now.subtract(3,`day`) : now.subtract(1,`day`)
+}
+
 async function run() {
   if (!process.env.REPORT_OUTPUT_PATH?.trim()) {
     process.env.REPORT_OUTPUT_PATH = path.join(process.cwd(), 'reports', 'daily-standup', `standup-${dayjs().format('YYYY-MM-DD')}.md`)
@@ -202,7 +205,8 @@ async function run() {
 
   const org = process.env.GITHUB_ORG || `wakeflow`
   let author = process.env.GITHUB_AUTHOR?.trim() || ``
-  const since = TWENTY_FOUR_HOURS_AGO.toISOString()
+  const reportingWindowStart = getReportingWindowStart()
+  const since = reportingWindowStart.toISOString()
 
   const octokit = new Octokit({ auth: token })
   if (!author) {
@@ -221,9 +225,9 @@ async function run() {
     for await (const { data: page } of iterator)
       repos = repos.concat(page)
 
-    const updatedSince = TWENTY_FOUR_HOURS_AGO.valueOf()
+    const updatedSince = reportingWindowStart.valueOf()
     repos = repos.filter(r => dayjs(r.updated_at).valueOf() >= updatedSince)
-    log.info(`commits: listed repos`,repos.length,`repos (updated in last 24h)`,repos.map(r => r.name).join(`, `))
+    log.info(`commits: listed repos`,repos.length,`repos (updated since ${since})`,repos.map(r => r.name).join(`, `))
   } catch (err) {
     const status = err.response?.status || 500
     const message = err.response?.data?.message || err.message || `Failed to list repos`
@@ -336,7 +340,7 @@ async function run() {
     notes = sections.join(`\n`).trimEnd()
     log.info(`commits: done`,allCommits.length,`commits`,notableByRepo.size,`repos with notable bullets`)
   } else {
-    notes = `No commits for today.`
+    notes = `No commits in the reporting window.`
     log.info(`commits: done`,allCommits.length,`total commits`)
   }
 
@@ -358,7 +362,7 @@ async function run() {
   console.log(notes)
 }
 
-export { run }
+export { getReportingWindowStart,run }
 
 const isMain = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])
 if (isMain)
