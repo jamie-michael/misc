@@ -1,3 +1,4 @@
+/* global console, process */
 import 'dotenv/config'
 import fs from 'fs'
 import path from 'path'
@@ -9,6 +10,12 @@ import { Octokit } from 'octokit'
 
 import log from '../src/lib/logger.js'
 import { sendEmail } from '../src/lib/email.js'
+import {
+  buildEmptyStandupReport,
+  generateMarkdownReport,
+  requestChatCompletion,
+  validateStandupMarkdown,
+} from '../src/lib/standup-ai.js'
 
 const LIMIT_PER_REPO = 100
 const OPENAI_URL = `https://api.openai.com/v1/chat/completions`
@@ -114,6 +121,58 @@ Where:
 
 Do NOT include any additional text outside the JSON.`
 
+const DAILY_REPORT_PROMPT_TEMPLATE = `You are an AI assistant composing a daily engineering stand-up report from structured commit classifications.
+
+You will receive JSON describing the day's work grouped by repository. Every commit already includes:
+- subject
+- shortHash
+- timestamp
+- category
+- impact_score
+- standupNotable
+- bullet_summary
+- reasoning
+
+Your task is to output markdown in this EXACT structure:
+
+Repositories
+repo-a
+repo-b
+
+Commits
+repo-a
+  * meaningful subject
+  * another meaningful subject
+
+repo-b
+  * meaningful subject
+
+Summary
+repo-a
+    * notable outcome
+    * (context) lower-priority item
+
+repo-b
+    * notable outcome
+
+Rules:
+- Output ONLY markdown. No code fences. No preamble.
+- The report MUST start with "Repositories".
+- Use the exact section titles: Repositories, Commits, Summary.
+- Include every repository that had work.
+- In Commits, include only the most meaningful subjects for each repo. Skip trivial subjects when they add no value.
+- In Summary, use only:
+  - "    * " for notable items
+  - "    * (context) " for lower-priority items
+- Do not invent work that is not in the JSON.
+- Prefer the provided bullet_summary and standupNotable signals over raw commit subjects when writing the Summary.
+- Keep the tone concise and professional.
+
+Report date: {{report_date}}
+
+Structured input JSON:
+{{report_input}}`
+
 function buildStandupPrompt({ branchName = ``,commitMessage = ``,diff = `` }) {
   return STANDUP_PROMPT_TEMPLATE
     .replace(`{{branch_name}}`,branchName)
@@ -130,42 +189,60 @@ function parseStandupResponse(raw) {
   if (typeof out.impact_score !== `number`) out.impact_score = Number(out.impact_score) || 1
   const rawNotable = out.standupNotable ?? out.standup_notable ?? out.include_in_standup
   if (typeof out.standupNotable !== `boolean`) out.standupNotable = Boolean(rawNotable)
+  if (!out.category || !out.bullet_summary)
+    throw new Error(`standup classification missing required fields`)
   return out
 }
 
-async function classifyCommitForStandup({ branchName = ``,commitMessage = ``,diff = `` }) {
-  const key = process.env.OPENAI_API_KEY?.trim()
-  if (!key) {
-    log.warn(`commits: OPENAI_API_KEY not set, skipping classification`)
-    return null
+function buildDailyReportPrompt({ reportDate,reportInput }) {
+  return DAILY_REPORT_PROMPT_TEMPLATE
+    .replace(`{{report_date}}`,reportDate)
+    .replace(`{{report_input}}`,JSON.stringify(reportInput,null,2))
+}
+
+function buildDailyReportInput(allCommits) {
+  const repoOrder = [...new Set(allCommits.map(c => c.repoName))]
+  return {
+    repositories: repoOrder.map(repoName => ({
+      repoName,
+      commits: allCommits
+        .filter(c => c.repoName === repoName)
+        .map(c => ({
+          shortHash: c.shortHash,
+          subject: c.subject || `(no subject)`,
+          timestamp: c.timestamp,
+          category: c.standup.category,
+          impact_score: c.standup.impact_score,
+          standupNotable: c.standup.standupNotable,
+          bullet_summary: c.standup.bullet_summary,
+          reasoning: c.standup.reasoning,
+        })),
+    })),
   }
+}
+
+async function classifyCommitForStandup({
+  branchName = ``,
+  commitMessage = ``,
+  diff = ``,
+  requestChat = requestChatCompletion,
+  env = process.env,
+}) {
   const truncatedDiff = typeof diff === `string` && diff.length > DIFF_MAX_CHARS
     ? diff.slice(0,DIFF_MAX_CHARS) + `\n... (truncated)`
     : (diff || ``)
   const prompt = buildStandupPrompt({ branchName,commitMessage: commitMessage || ``,diff: truncatedDiff })
-  try {
-    const { data } = await axios.post(
-      OPENAI_URL,
-      {
-        model: `gpt-4o-mini`,
-        messages: [
-          { role: `system`,content: `You output only valid JSON. No markdown, no explanation outside the JSON.` },
-          { role: `user`,content: prompt },
-        ],
-      },
-      {
-        headers: { Authorization: `Bearer ${key}`,'Content-Type': `application/json` },
-        timeout: 30_000,
-      },
-    )
-    const content = data?.choices?.[0]?.message?.content
-    if (!content) return null
-    return parseStandupResponse(content)
-  } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message
-    log.warn(`commits: classification failed`,msg)
-    return null
-  }
+  const content = await requestChat({
+    messages: [
+      { role: `system`,content: `You output only valid JSON. No markdown, no explanation outside the JSON.` },
+      { role: `user`,content: prompt },
+    ],
+    timeoutMs: 30_000,
+    label: `daily-classification`,
+    axiosClient: axios,
+    env,
+  })
+  return parseStandupResponse(content)
 }
 
 function normalizeCommit(apiCommit,repoName,diff = null) {
@@ -199,8 +276,7 @@ async function run() {
   }
   const token = process.env.GITHUB_TOKEN
   if (!token?.trim()) {
-    log.error(`commits: GITHUB_TOKEN is not set`)
-    process.exit(1)
+    throw new Error(`commits: GITHUB_TOKEN is not set`)
   }
 
   const org = process.env.GITHUB_ORG || `wakeflow`
@@ -208,12 +284,12 @@ async function run() {
   const reportingWindowStart = getReportingWindowStart()
   const since = reportingWindowStart.toISOString()
 
-  const octokit = new Octokit({ auth: token })
+  const octokit = octokitFactory(token)
   if (!author) {
     const { data: me } = await octokit.rest.users.getAuthenticated()
     author = me.login
   }
-  log.info(`commits: fetching`,{ org,author,since })
+  logMod.info(`commits: fetching`,{ org,author,since })
 
   let repos = []
   try {
@@ -231,8 +307,7 @@ async function run() {
   } catch (err) {
     const status = err.response?.status || 500
     const message = err.response?.data?.message || err.message || `Failed to list repos`
-    log.error(`commits: listForOrg failed`,status,message)
-    process.exit(1)
+    throw new Error(`commits: listForOrg failed ${status} ${message}`)
   }
 
   const allCommits = []
@@ -247,7 +322,7 @@ async function run() {
         per_page: LIMIT_PER_REPO,
       })
       if (data.length > 0)
-        log.info(`commits:`,r.name,data.length,`commits`)
+        logMod.info(`commits:`,r.name,data.length,`commits`)
 
       for (const apiCommit of data) {
         let diff = null
@@ -260,7 +335,7 @@ async function run() {
           })
           diff = typeof diffData === `string` ? diffData : null
         } catch (err) {
-          log.warn(`commits: getCommit diff failed`,r.name,apiCommit.sha?.slice(0,7),err.message)
+          logMod.warn(`commits: getCommit diff failed`,r.name,apiCommit.sha?.slice(0,7),err.message)
         }
         allCommits.push(normalizeCommit(apiCommit,r.name,diff))
       }
@@ -268,7 +343,7 @@ async function run() {
     } catch (err) {
       if (err.response?.status === 409) continue
       lastError = err.response?.data?.message || err.message
-      log.warn(`commits: listCommits failed for`,r.name,err.response?.status,lastError)
+      logMod.warn(`commits: listCommits failed for`,r.name,err.response?.status,lastError)
     }
 
   allCommits.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0))
@@ -276,90 +351,54 @@ async function run() {
   let notes = ``
   if (allCommits.length > 0) {
     for (const commit of allCommits) {
-      const standup = await classifyCommitForStandup({
+      const standup = await classifyCommit({
         branchName: ``,
         commitMessage: commit.message || commit.subject,
         diff: commit.diff ?? ``,
+        env,
       })
-      if (standup) {
-        commit.standup = standup
-        log.info(`commits: classified`,commit.shortHash,commit.repoName,commit.subject?.slice(0,50),{
-          category: standup.category,
-          impact_score: standup.impact_score,
-          standupNotable: standup.standupNotable,
-          bullet_summary: standup.bullet_summary?.slice(0,80),
-          reasoning: standup.reasoning?.slice(0,120),
-        })
-      } else
-        log.warn(`commits: no classification`,commit.shortHash,commit.repoName,commit.subject?.slice(0,50))
+      commit.standup = standup
+      logMod.info(`commits: classified`,commit.shortHash,commit.repoName,commit.subject?.slice(0,50),{
+        category: standup.category,
+        impact_score: standup.impact_score,
+        standupNotable: standup.standupNotable,
+        bullet_summary: standup.bullet_summary?.slice(0,80),
+        reasoning: standup.reasoning?.slice(0,120),
+      })
     }
-    const repoOrder = [...new Set(allCommits.map(c => c.repoName))]
-    const commitsByRepo = new Map()
-    for (const c of allCommits) {
-      if (!commitsByRepo.has(c.repoName)) commitsByRepo.set(c.repoName,[])
-      commitsByRepo.get(c.repoName).push(c.subject || `(no subject)`)
-    }
-    const notableByRepo = new Map()
-    const otherByRepo = new Map()
-    for (const c of allCommits) {
-      if (!c.standup?.bullet_summary) continue
-      const isNotable = c.standup.standupNotable
-      const map = isNotable ? notableByRepo : otherByRepo
-      if (!map.has(c.repoName)) map.set(c.repoName,[])
-      map.get(c.repoName).push(c.standup.bullet_summary)
-    }
-
-    const sections = []
-    sections.push(`Repositories`)
-    sections.push(repoOrder.join(`\n`))
-    sections.push(``)
-    sections.push(`Commits`)
-    for (const repo of repoOrder) {
-      const subjects = commitsByRepo.get(repo) || []
-      sections.push(repo)
-      for (const subj of subjects)
-        sections.push(`  * ${subj}`)
-      sections.push(``)
-    }
-    sections.push(`Summary`)
-    const hasAnySummary = notableByRepo.size > 0 || otherByRepo.size > 0
-    if (hasAnySummary)
-      for (const repo of repoOrder) {
-        const notable = notableByRepo.get(repo) || []
-        const other = otherByRepo.get(repo) || []
-        if (notable.length === 0 && other.length === 0) continue
-        sections.push(repo)
-        for (const b of notable)
-          sections.push(`    * ${b}`)
-        for (const b of other)
-          sections.push(`    * (context) ${b}`)
-        sections.push(``)
-      }
-    else
-      sections.push(`(no stand-up items)`)
-    notes = sections.join(`\n`).trimEnd()
-    log.info(`commits: done`,allCommits.length,`commits`,notableByRepo.size,`repos with notable bullets`)
+    const reportInput = buildDailyReportInput(allCommits)
+    notes = await generateReport({
+      userPrompt: buildDailyReportPrompt({
+        reportDate: today.format(`YYYY-MM-DD`),
+        reportInput,
+      }),
+      timeoutMs: 60_000,
+      label: `daily-report`,
+      env,
+    })
+    validateStandupMarkdown(notes)
+    logMod.info(`commits: done`,allCommits.length,`commits`,reportInput.repositories.length,`repos in report`)
   } else {
     notes = `No commits in the reporting window.`
     log.info(`commits: done`,allCommits.length,`total commits`)
   }
 
-  const outputPath = process.env.REPORT_OUTPUT_PATH?.trim()
   if (outputPath) {
-    const dir = path.dirname(outputPath)
-    fs.mkdirSync(dir,{ recursive: true })
-    fs.writeFileSync(outputPath,notes,`utf8`)
-    log.info(`commits: report written`,outputPath)
+    const dir = pathMod.dirname(outputPath)
+    fsMod.mkdirSync(dir,{ recursive: true })
+    fsMod.writeFileSync(outputPath,notes,`utf8`)
+    logMod.info(`commits: report written`,outputPath)
   }
 
-  const emailResult = await sendEmail({
-    subject: `Standup ${dayjs().format('YYYY-MM-DD')}`,
+  const emailResult = await sendEmailFn({
+    subject: `Standup ${today.format('YYYY-MM-DD')}`,
     body: notes,
   })
-  if (emailResult.sent) log.info(`commits: email sent`, emailResult.to)
-  else if (emailResult.skipped) log.warn(`commits: email skipped`, emailResult.reason)
+  if (emailResult.sent) logMod.info(`commits: email sent`, emailResult.to)
+  else if (emailResult.skipped) logMod.warn(`commits: email skipped`, emailResult.reason)
 
   console.log(notes)
+  return notes
 }
 
 export { getReportingWindowStart,run }
