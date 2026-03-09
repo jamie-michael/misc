@@ -1,3 +1,4 @@
+/* global console, process */
 import 'dotenv/config'
 import fs from 'fs'
 import path from 'path'
@@ -8,8 +9,11 @@ import dayjs from 'dayjs'
 
 import log from '../src/lib/logger.js'
 import { sendEmail } from '../src/lib/email.js'
+import {
+  generateMarkdownReport,
+  validateStandupMarkdown,
+} from '../src/lib/standup-ai.js'
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 // Week = previous Friday + Mon, Tue, Wed, Thu (run just after Thursday night's daily)
 const THURSDAY_DOW = 4 // 0 = Sunday in JS
 const DAILY_STANDUP_DIR = path.join(process.cwd(), 'reports', 'daily-standup')
@@ -31,7 +35,7 @@ Your job is to output a SINGLE report in the EXACT same format as a daily stand-
    For each repo that had work, list only the MOST NOTEWORTHY commit subjects (not every commit). Skip trivial ones (lockfile, formatting, tiny tweaks). Use "  * " before each subject. One repo name as heading, then indented "  * subject" lines.
 
 3) Summary
-   For each repo, write a short list of the most noteworthy outcomes from the week. Use "    • " for headline items (user-facing or important internal work) and "    (context) " for lower-priority items. Merge repeated or similar points across days into one bullet. Keep the same professional, concise bullet style as the daily summaries.
+   For each repo, write a short list of the most noteworthy outcomes from the week. Use "    * " for headline items (user-facing or important internal work) and "    * (context) " for lower-priority items. Merge repeated or similar points across days into one bullet. Keep the same professional, concise bullet style as the daily summaries.
 
 Rules:
 - Use the EXACT section titles: "Repositories", "Commits", "Summary" (no extra headings like "Weekly" or "Week ending").
@@ -63,18 +67,18 @@ function getWeekDates(weekEndingThursday) {
   ]
 }
 
-function gatherWeekStandups() {
-  const weekEnding = getWeekEndingThursday()
+function gatherWeekStandups({ fsMod = fs,logMod = log,refDate = dayjs() } = {}) {
+  const weekEnding = getWeekEndingThursday(refDate)
   const dates = getWeekDates(weekEnding)
   const files = []
   for (const d of dates) {
     const filePath = getStandupPathForDate(d)
-    if (fs.existsSync(filePath)) {
-      const content = fs.readFileSync(filePath, 'utf8')
+    if (fsMod.existsSync(filePath)) {
+      const content = fsMod.readFileSync(filePath, 'utf8')
       const dateStr = d.format('YYYY-MM-DD')
       files.push({ date: dateStr, path: filePath, content })
     } else {
-      log.info(`weekly: no standup file for ${d.format('YYYY-MM-DD')}, skipping`)
+      logMod.info(`weekly: no standup file for ${d.format('YYYY-MM-DD')}, skipping`)
     }
   }
   return { files, weekEnding: weekEnding.format('YYYY-MM-DD') }
@@ -87,55 +91,45 @@ function buildCombinedInput(standupFiles) {
   return parts.join('\n\n---\n\n')
 }
 
-async function summarizeWithAi(combinedMarkdown) {
-  const key = process.env.OPENAI_API_KEY?.trim()
-  if (!key) {
-    log.warn('weekly: OPENAI_API_KEY not set, cannot summarize')
-    return null
-  }
-  try {
-    const { data } = await axios.post(
-      OPENAI_URL,
-      {
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You output only valid markdown. No code blocks around the whole response.' },
-          { role: 'user', content: `${WEEKLY_SUMMARY_PROMPT}\n\n## Daily stand-up reports\n\n${combinedMarkdown}` },
-        ],
-      },
-      {
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        timeout: 60_000,
-      },
-    )
-    const content = data?.choices?.[0]?.message?.content
-    return content?.trim() ?? null
-  } catch (err) {
-    const msg = err.response?.data?.error?.message || err.message
-    log.warn('weekly: AI summary failed', msg)
-    return null
-  }
+function buildWeeklyReportPrompt(combinedMarkdown) {
+  return `${WEEKLY_SUMMARY_PROMPT}\n\n## Daily stand-up reports\n\n${combinedMarkdown}`
 }
 
-async function run() {
-  const { files: standupFiles, weekEnding } = gatherWeekStandups()
+async function run({
+  env = process.env,
+  now = dayjs(),
+  fsMod = fs,
+  pathMod = path,
+  generateReport = generateMarkdownReport,
+  sendEmailFn = sendEmail,
+  logMod = log,
+} = {}) {
+  const { files: standupFiles, weekEnding } = gatherWeekStandups({
+    fsMod,
+    logMod,
+    refDate: now,
+  })
   if (standupFiles.length === 0) {
-    log.warn('weekly: no daily standup files found for week ending', weekEnding, '(Fri–Thu)')
-    process.exit(1)
+    throw new Error(`weekly: no daily standup files found for week ending ${weekEnding} (Fri–Thu)`)
   }
 
-  log.info('weekly: week ending', weekEnding, '— found', standupFiles.length, 'standup files', standupFiles.map(f => f.date).join(', '))
+  logMod.info('weekly: week ending', weekEnding, '— found', standupFiles.length, 'standup files', standupFiles.map(f => f.date).join(', '))
 
   const combined = buildCombinedInput(standupFiles)
-  const summary = await summarizeWithAi(combined)
+  const summary = await generateReport({
+    userPrompt: buildWeeklyReportPrompt(combined),
+    timeoutMs: 60_000,
+    label: `weekly-report`,
+    env,
+    axiosClient: axios,
+  })
+  const validatedSummary = validateStandupMarkdown(summary)
 
   const outputFileName = `weekly-standup-${weekEnding}.md`
-  const outputPath = process.env.WEEKLY_REPORT_OUTPUT_PATH?.trim() ||
-    path.join(WEEKLY_STANDUP_DIR, outputFileName)
+  const outputPath = env.WEEKLY_REPORT_OUTPUT_PATH?.trim() ||
+    pathMod.join(WEEKLY_STANDUP_DIR, outputFileName)
 
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-
-  const fallback = `Repositories\n(none)\n\nCommits\n(none)\n\nSummary\n(no summary — OPENAI_API_KEY missing or API error)`
+  fsMod.mkdirSync(pathMod.dirname(outputPath), { recursive: true })
   const sourcesBlock = [
     '',
     '---',
@@ -143,22 +137,28 @@ async function run() {
     '**Sources (files read):**',
     ...standupFiles.map(f => `- \`reports/daily-standup/standup-${f.date}.md\``),
   ].join('\n')
-  const fullContent = (summary || fallback) + sourcesBlock
+  const fullContent = validatedSummary + sourcesBlock
 
-  fs.writeFileSync(outputPath, fullContent, 'utf8')
-  log.info('weekly: report written', outputPath)
+  fsMod.writeFileSync(outputPath, fullContent, 'utf8')
+  logMod.info('weekly: report written', outputPath)
 
-  const emailResult = await sendEmail({
+  const emailResult = await sendEmailFn({
     subject: `Weekly standup week ending ${weekEnding}`,
     body: fullContent,
   })
-  if (emailResult.sent) log.info('weekly: email sent', emailResult.to)
-  else if (emailResult.skipped) log.warn('weekly: email skipped', emailResult.reason)
+  if (emailResult.sent) logMod.info('weekly: email sent', emailResult.to)
+  else if (emailResult.skipped) logMod.warn('weekly: email skipped', emailResult.reason)
 
   console.log(fullContent)
+  return fullContent
 }
 
-export { run }
+export {
+  buildCombinedInput,
+  buildWeeklyReportPrompt,
+  gatherWeekStandups,
+  run,
+}
 
 const isMain = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])
 if (isMain) {
