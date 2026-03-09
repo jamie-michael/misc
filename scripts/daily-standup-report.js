@@ -18,6 +18,7 @@ import {
 } from '../src/lib/standup-ai.js'
 
 const LIMIT_PER_REPO = 100
+const OPENAI_URL = `https://api.openai.com/v1/chat/completions`
 const DIFF_MAX_CHARS = 6000
 
 const STANDUP_PROMPT_TEMPLATE = `You are an AI assistant generating structured stand-up data from a single Git commit.
@@ -265,30 +266,23 @@ function normalizeCommit(apiCommit,repoName,diff = null) {
   }
 }
 
-async function run({
-  env = process.env,
-  now = dayjs(),
-  fsMod = fs,
-  pathMod = path,
-  octokitFactory = auth => new Octokit({ auth }),
-  classifyCommit = classifyCommitForStandup,
-  generateReport = generateMarkdownReport,
-  sendEmailFn = sendEmail,
-  logMod = log,
-} = {}) {
-  const today = dayjs(now)
-  const sinceDate = today.subtract(1,`day`)
-  const outputPath = env.REPORT_OUTPUT_PATH?.trim() ||
-    pathMod.join(process.cwd(), 'reports', 'daily-standup', `standup-${today.format('YYYY-MM-DD')}.md`)
+function getReportingWindowStart(now = dayjs()) {
+  return now.day() === 1 ? now.subtract(3,`day`) : now.subtract(1,`day`)
+}
 
-  const token = env.GITHUB_TOKEN
+async function run() {
+  if (!process.env.REPORT_OUTPUT_PATH?.trim()) {
+    process.env.REPORT_OUTPUT_PATH = path.join(process.cwd(), 'reports', 'daily-standup', `standup-${dayjs().format('YYYY-MM-DD')}.md`)
+  }
+  const token = process.env.GITHUB_TOKEN
   if (!token?.trim()) {
     throw new Error(`commits: GITHUB_TOKEN is not set`)
   }
 
-  const org = env.GITHUB_ORG || `wakeflow`
-  let author = env.GITHUB_AUTHOR?.trim() || ``
-  const since = sinceDate.toISOString()
+  const org = process.env.GITHUB_ORG || `wakeflow`
+  let author = process.env.GITHUB_AUTHOR?.trim() || ``
+  const reportingWindowStart = getReportingWindowStart()
+  const since = reportingWindowStart.toISOString()
 
   const octokit = octokitFactory(token)
   if (!author) {
@@ -307,9 +301,9 @@ async function run({
     for await (const { data: page } of iterator)
       repos = repos.concat(page)
 
-    const updatedSince = sinceDate.valueOf()
+    const updatedSince = reportingWindowStart.valueOf()
     repos = repos.filter(r => dayjs(r.updated_at).valueOf() >= updatedSince)
-    logMod.info(`commits: listed repos`,repos.length,`repos (updated in last 24h)`,repos.map(r => r.name).join(`, `))
+    log.info(`commits: listed repos`,repos.length,`repos (updated since ${since})`,repos.map(r => r.name).join(`, `))
   } catch (err) {
     const status = err.response?.status || 500
     const message = err.response?.data?.message || err.message || `Failed to list repos`
@@ -385,8 +379,8 @@ async function run({
     validateStandupMarkdown(notes)
     logMod.info(`commits: done`,allCommits.length,`commits`,reportInput.repositories.length,`repos in report`)
   } else {
-    notes = buildEmptyStandupReport()
-    logMod.info(`commits: done`,allCommits.length,`total commits`)
+    notes = `No commits in the reporting window.`
+    log.info(`commits: done`,allCommits.length,`total commits`)
   }
 
   if (outputPath) {
@@ -407,13 +401,7 @@ async function run({
   return notes
 }
 
-export {
-  buildDailyReportInput,
-  buildDailyReportPrompt,
-  classifyCommitForStandup,
-  parseStandupResponse,
-  run,
-}
+export { getReportingWindowStart,run }
 
 const isMain = path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1])
 if (isMain)
